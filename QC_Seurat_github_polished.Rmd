@@ -1,0 +1,319 @@
+---
+title: "QC codes for organoids analysis AB002"
+author: "Alessandro Bertero data and Elisa Balmas codes"
+date: "27/02/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+# Set up the environment with required packages
+library(monocle3)
+#library(tidyr)
+#library(stringr)
+library(grid)
+library(viridis)
+library(ggthemes)
+#library(dplyr)
+library(tidyverse)
+library(ggsignif)
+library(umap)
+library(heatmap3)
+library(plyr)
+library(edgeR)
+library(compareGroups)
+library(dbscan)
+library(MAST)
+library(geosphere)
+library(RColorBrewer)
+library(Seurat)
+library(htmlwidgets)
+library(Matrix)
+library(tidyseurat)
+library(SeuratWrappers)
+library(ggplot2)
+library(ggridges)
+#library(MySeuratWrappers)
+
+library(ggplot2); library(reshape2); theme_set(theme_bw(26) + theme(panel.grid.major = element_blank(), 
+                                                                    panel.grid.minor = element_blank()) +
+                                                 theme(legend.key = element_blank()))
+update_geom_defaults("point", aes(size = 4))
+
+#setwd("/home/ebalmas/scpHUB/projects/AB02/analysis_EB")
+
+# Session options
+options(stringsAsFactors = FALSE)
+set.seed(12345)
+
+# Set up the ggplot default params
+theme_set(theme_bw(12) + 
+          theme(panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                plot.title = element_text(size=15, face="bold", margin = margin(10,0,10,0)),
+                axis.text.x = element_text(angle=45, hjust = 1)))
+
+
+# Set up filename prefixes and output folders with the data
+dir.create("Output")
+dir.create(file.path("Output","QC_Seurat"))
+dir.create(file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d")))
+dir.create(file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "R_objects"))
+dir.create(file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "dotplots"))
+dir.create(file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "stat"))
+dir.create(file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "csv"))
+dir.create(file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "PCA"))
+dir.create(file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "UMAP"))
+
+fname_prefix_R <- file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "R_objects", 
+                               format(Sys.Date(), "%y%m%d"))
+fname_prefix_dotplot <- file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "dotplots", 
+                                                 format(Sys.Date(), "%y%m%d"))
+fname_prefix_csv<-file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "csv", 
+                               format(Sys.Date(), "%y%m%d"))
+fname_prefix_stat<-file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "stat", 
+                               format(Sys.Date(), "%y%m%d"))
+fname_prefix_PCA<-file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "PCA", 
+                               format(Sys.Date(), "%y%m%d"))
+fname_prefix_UMAP<-file.path("Output","QC_Seurat", format(Sys.Date(), "%y%m%d"), "UMAP", 
+                               format(Sys.Date(), "%y%m%d"))
+```
+## create csv files
+```{r}
+
+matrix_dir ="~/scpHUB/projects/FP01/FP-nested_raw/outs/count/filtered_feature_bc_matrix"
+
+barcode.path <- paste0(matrix_dir, "/barcodes.tsv.gz")
+features.path <- paste0(matrix_dir, "/features.tsv.gz")
+matrix.path <- paste0(matrix_dir, "/matrix.mtx.gz")
+#mat <- readMM(file = matrix.path)
+
+```
+
+## create/load data into seurat
+
+```{r}
+
+matrix_dir ="~/scpHUB/projects/FP01/FP-nested_raw/outs/count/filtered_feature_bc_matrix"
+
+sample_info=read.csv("aggr_all_config.csv")
+sample.names=sample_info$sample_id
+
+
+data=Read10X(
+  data.dir =matrix_dir,
+  gene.column = 2,
+  cell.column = 1,
+  unique.features = TRUE,
+  strip.suffix = FALSE
+)
+
+#create Seurat object
+data_seurat <- CreateSeuratObject(counts = data$`Gene Expression`, project = "FP01_nested", names.delim = "-", min.cells = 3, min.features = 200,  names.field = 2)
+
+d=data_seurat
+
+#build sample name file to add metadata in Seurat
+
+sample_info$orig.ident <- as.factor(sample_info$orig.ident)
+OBJ_meta <- data_seurat@meta.data %>% 
+  dplyr::select(orig.ident)
+r=rownames((OBJ_meta))
+OBJ_meta$libID=r
+OBJ_meta=OBJ_meta%>%
+  dplyr::left_join(sample_info, by="orig.ident")%>%
+  dplyr:: distinct(libID, .keep_all=T)
+row.names(OBJ_meta)<-r
+OBJ_meta$test=OBJ_meta$libID==rownames((OBJ_meta))
+summary(as.factor(OBJ_meta$test))
+OBJ_meta=OBJ_meta%>%
+  dplyr::select(-test)
+
+#add sample names
+data_seurat<- AddMetaData(data_seurat, OBJ_meta, col.name = NULL)
+#d2=data_seurat
+#head(data_seurat@meta.data)
+sample_info=data_seurat@meta.data #10435 cells
+sample_info=sample_info%>%
+  mutate(cellID = sapply(strsplit(as.character(libID), "-"), "[[", 1))
+rownames(sample_info)=sample_info$libID
+data_seurat<- AddMetaData(data_seurat, sample_info, col.name = NULL)
+#add mitocondrial read percent
+data_seurat[["percent.mt"]] <- PercentageFeatureSet(data_seurat, pattern = "^MT-")
+data_seurat <- subset(data_seurat, subset = sample_id!="NA")#clean the object
+
+# Visualize QC metrics as a violin plot
+VlnPlot(data_seurat, features = c("nFeature_RNA", "nCount_RNA"),group.by = "sample_id",
+     pt.size=0.1, ncol = 2)
+
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "violin_QC_RNA_features.png"), width = 12, height = 7)
+
+
+plot1 <- FeatureScatter(data_seurat, feature1 = "nCount_RNA", feature2 = "percent.mt",group.by = "sample_id")
+
+plot2 <- FeatureScatter(data_seurat, feature1 = "nCount_RNA", feature2 = "nFeature_RNA",group.by = "sample_id")
+plot1 + plot2
+
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "DT_QC_gene_capture.png"),
+     width = 12, height = 8)
+
+summary(as.factor(data_seurat@meta.data$sample_id))
+pre_selection=data.frame(summary(as.factor(data_seurat@meta.data$sample_id)))
+
+#####no need selection, becuase I am using the selected data from Maria
+#select good quality data
+#sequencing depth is high and all parameters seems higher than usual, I selected %MT>50 and below 500 genes (they seem the one with higher content of MT genes) and higher than 10000 genes 
+
+data_seurat_clean <- subset(data_seurat, subset = nFeature_RNA>100 & nFeature_RNA<9500 & percent.mt<30)#clean the object
+
+
+plot1 <- FeatureScatter(data_seurat_clean, feature1 = "nCount_RNA", feature2 = "percent.mt",group.by = "sample_id")
+
+plot2 <- FeatureScatter(data_seurat_clean, feature1 = "nCount_RNA", feature2 = "nFeature_RNA",group.by = "sample_id")
+plot1 + plot2
+
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "DT_QC_after_cleanup.png"),
+     width = 12, height = 8)
+
+summary(as.factor(data_seurat_clean@meta.data$RXN))
+post_selection=data.frame(summary(as.factor(data_seurat_clean@meta.data$sample_id)))
+
+Rdata_filename = paste0(fname_prefix_R, "_seurat_before_clean.RData")
+save(data, OBJ_meta, sample_info, data_seurat,
+     file = Rdata_filename)
+
+Rdata_filename = paste0(fname_prefix_R, "_seurat_clean.RData")
+save(data, OBJ_meta, sample_info, data_seurat_clean,
+     file = Rdata_filename)
+
+
+#data_path = file.path("240111_seurat_before_clean.RData")
+#load(data_path)
+
+#data_path = file.path("240111_seurat_clean.RData")
+#load(data_path)
+
+
+```
+
+## normalize data
+```{r}
+data_seurat_clean <- NormalizeData(data_seurat_clean, normalization.method = "LogNormalize", scale.factor = 10000)
+
+# set seed and put two plots in one figure
+set.seed(123)
+par(mfrow=c(1,2))
+# original expression distribution
+raw_geneExp = as.vector(data_seurat_clean@assays[["RNA"]]@layers[["counts"]]) %>% sample(10000)
+raw_geneExp = raw_geneExp[raw_geneExp != 0]
+a=hist(raw_geneExp)
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "hist_QC_rowGE_normalization.png"),
+     width = 12, height = 8)
+# expression distribution after normalization
+logNorm_geneExp = as.vector(data_seurat_clean@assays[["RNA"]]@layers[["data"]]) %>% sample(10000)
+logNorm_geneExp = logNorm_geneExp[logNorm_geneExp != 0]
+b=hist(logNorm_geneExp)
+
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "hist_QC_LognormGE_normalization.png.png"),
+     width = 12, height = 8)
+```
+ 
+## find highly variable genes and scale the data
+
+```{r}
+data_seurat_clean <- FindVariableFeatures(data_seurat_clean, selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(data_seurat_clean), 10)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(data_seurat_clean) + 
+  theme(legend.position="top")
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE) + 
+  theme(legend.position="none")
+plot1 + plot2
+
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "DT_QC_HVG.png"),
+     width = 12, height = 8)
+
+#scale
+all.genes=rownames(data_seurat_clean)
+data_seurat_clean <- ScaleData(data_seurat_clean, features = all.genes)
+
+#PCA
+data_seurat_clean<- RunPCA(data_seurat_clean, features = VariableFeatures(object = data_seurat_clean))
+
+# Examine and visualize PCA results 
+#define meaningful PCAs
+ElbowPlot(data_seurat_clean) #main variation is captured from PCA 1 to 15
+ggsave(filename = paste0(fname_prefix_PCA, "_", "PCA_QC_elbow.png"),
+     width = 8, height = 5)
+
+print(data_seurat_clean[["pca"]], dims = 1:15, nfeatures = 5)
+
+VizDimLoadings(data_seurat_clean,dims = 1:6, nfeatures = 30, col = "blue", reduction = "pca", projected = FALSE, balanced = FALSE, ncol = NULL, combine = TRUE)
+ggsave(filename = paste0(fname_prefix_PCA, "_", "PCA_QC_genes_definingPCs.png"),
+     width = 12, height = 15)
+
+png(file= paste0(fname_prefix_PCA, "_", "PCA_QC_heatmaps_PCs.png"),
+width=800, height=1200)
+DimHeatmap(data_seurat_clean, dims = 1:15, cells = 500, balanced = TRUE)
+dev.off()
+
+#no clear differences between replicates, mainly between D4 and D7
+DimPlot(data_seurat_clean, dims = c(1,2), reduction = "pca", group.by = "sample_id")
+ggsave(filename = paste0(fname_prefix_PCA, "_", "PCA_QC_PCAplots_1_2.png"),
+     width = 8, height = 8)
+
+
+```
+
+## add cell cycle scoring
+###regress out cell cicle genes with sclaedata if needed
+
+```{r}
+# A list of cell cycle markers, from Tirosh et al, 2015, is loaded with Seurat. and downloaded here
+exp.mat <- read.table(file = "cell_cicle_reg_genes/nestorawa_forcellcycle_expressionMatrix.txt", header = TRUE, 
+    as.is = TRUE, row.names = 1)
+# We can# segregate this list into markers of G2/M phase and markers of S phase
+s.genes <- cc.genes$s.genes #s phase genes
+g2m.genes <- cc.genes$g2m.genes #G2phase genes
+
+data_seurat_clean <- CellCycleScoring(data_seurat_clean, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+# Visualize the distribution of cell cycle markers across
+RidgePlot(data_seurat_clean, features = c("PCNA", "TOP2A", "MCM6", "MKI67","Fucciplex"), ncol = 2)
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "Cell_cycle.png"),
+     width = 8, height = 8)
+#data_seurat_clean_cellcycle_correct<- ScaleData(data_seurat_clean, vars.to.regress = c("S.Score", "G2M.Score"), features = rownames(data_seurat_clean))
+```
+
+
+## clustering and UMAP
+```{r}
+data_seurat_clean <- FindNeighbors(data_seurat_clean, dims = 1:15)#first 15 seem to be  meaningful
+data_seurat_clean <- FindClusters(data_seurat_clean, resolution = 0.4)
+summary(as.factor(Idents(data_seurat_clean)))
+
+data_seurat_clean <- RunUMAP(data_seurat_clean, dims = 1:15)
+DimPlot(data_seurat_clean, reduction = "umap", split.by = "sample_id")
+
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP.png"),
+     width = 5, height = 3)
+
+
+Rdata_filename = paste0(fname_prefix_R, "_seurat_processed.RData")
+save(data, OBJ_meta, sample_info, data_seurat_clean,
+     file = Rdata_filename)
+```
+
+

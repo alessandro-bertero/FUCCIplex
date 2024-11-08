@@ -1,0 +1,1171 @@
+---
+title: "n2 trasform Seurat data into monocle codes for organoids analysis AB002"
+author: "Alessandro Bertero data and Elisa Balmas codes"
+date: "27/02/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+# Set up the environment with required packages
+library(monocle3)
+library(tidyr)
+library(stringr)
+library(grid)
+library(viridis)
+library(ggthemes)
+library(dplyr)
+library(tidyverse)
+library(ggsignif)
+library(umap)
+library(heatmap3)
+library(plyr)
+library(edgeR)
+library(compareGroups)
+library(dbscan)
+library(MAST)
+library(geosphere)
+library(RColorBrewer)
+library(Seurat)
+library(htmlwidgets)
+library(Matrix)
+library(tidyseurat)
+library(SeuratWrappers)
+library(ggplot2)
+library(ggridges)
+library(fgsea)
+library(msigdbr)
+library(ggpubr)
+#library(MySeuratWrappers)
+
+library(ggplot2); library(reshape2); theme_set(theme_bw(26) + theme(panel.grid.major = element_blank(), 
+                                                                    panel.grid.minor = element_blank()) +
+                                                 theme(legend.key = element_blank()))
+update_geom_defaults("point", aes(size = 4))
+
+#setwd("/home/ebalmas/scpHUB/projects/AB02/analysis_EB")
+
+# Session options
+options(stringsAsFactors = FALSE)
+set.seed(12345)
+
+# Set up the ggplot default params
+theme_set(theme_bw(12) + 
+          theme(panel.grid.major = element_blank(), 
+                panel.grid.minor = element_blank(),
+                plot.title = element_text(size=15, face="bold", margin = margin(10,0,10,0)),
+                axis.text.x = element_text(angle=45, hjust = 1)))
+
+
+# Set up filename prefixes and output folders with the data
+dir.create("Output")
+dir.create(file.path("Output","monocle"))
+dir.create(file.path("Output","monocle", format(Sys.Date(), "%y%m%d")))
+dir.create(file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "R_objects"))
+dir.create(file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "dotplots"))
+dir.create(file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "dotplots","single"))
+dir.create(file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "stat"))
+dir.create(file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "csv"))
+dir.create(file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "PCA"))
+dir.create(file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "UMAP"))
+dir.create(file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "mosaic"))
+dir.create(file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "markers"))
+
+fname_prefix_R <- file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "R_objects", 
+                               format(Sys.Date(), "%y%m%d"))
+fname_prefix_dotplot <- file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "dotplots", 
+                                                 format(Sys.Date(), "%y%m%d"))
+fname_prefix_dotplot_single <- file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "dotplots", "single",
+                                                 format(Sys.Date(), "%y%m%d"))
+fname_prefix_csv<-file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "csv", 
+                               format(Sys.Date(), "%y%m%d"))
+fname_prefix_stat<-file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "stat", 
+                               format(Sys.Date(), "%y%m%d"))
+fname_prefix_PCA<-file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "PCA", 
+                               format(Sys.Date(), "%y%m%d"))
+fname_prefix_UMAP<-file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "UMAP", 
+                               format(Sys.Date(), "%y%m%d"))
+fname_prefix_mosaic<-file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "mosaic", 
+                               format(Sys.Date(), "%y%m%d"))
+fname_prefix_markers<-file.path("Output","monocle", format(Sys.Date(), "%y%m%d"), "markers", 
+                               format(Sys.Date(), "%y%m%d"))
+```
+## load data
+```{r}
+
+data_path = file.path("240111_seurat_processed.RData")
+
+load(data_path)
+
+```
+
+## change from RDS Seurat object to CDS Monocle file
+
+```{r}
+
+seurat.object <- data_seurat_clean
+umapCoord <- as.data.frame(Seurat::Embeddings(object = data_seurat_clean[["umap"]]))
+data_seurat_clean<- AddMetaData(data_seurat_clean, umapCoord, col.name = NULL)
+
+metadata_table <- data.frame(seurat.object@meta.data)
+metadata_table$UMI_id <- rownames(metadata_table)
+umapCoord$UMI_id <- rownames(umapCoord)
+
+seurat_info_table <- data.frame(seurat.object@meta.data)
+rownames(seurat_info_table)=seurat_info_table$libID
+
+#to create monocle object 
+cds<- as.cell_data_set(data_seurat_clean)
+
+#preprocess cds
+set.seed(1234556)
+cds = preprocess_cds(cds, num_dim = 40) #I first calculated 100, but 40 was sufficient
+plot_pc_variance_explained(cds_new)
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "variance_40.png"),
+     width = 12, height = 8)
+cds= reduce_dimension(cds)
+
+plot_cells(cds,  color_cells_by = "seurat_clusters",group_label_size = 7, cell_size=0.8)#map by seurat clusters generated
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_bySeurat_clust.png"),
+     width = 18, height = 8)
+
+Rdata_filename = paste0(fname_prefix_R, "_monocle_cds.RData")
+save(data, OBJ_meta, sample_info, data_seurat_clean, seurat_info_table, expression_matrix, gene_annotation,cds,
+     file = Rdata_filename)
+#monocle.object = reduce_dimension(monocle.object, reduction_method = 'UMAP')
+
+
+#monocle.object = learn_graph(monocle.object)
+#monocle.object = order_cells(monocle.object, reduction_method = "UMAP")
+set.seed(123456789)
+cds_8 = cluster_cells(cds_new, resolution = 6e-4)
+colData(cds_8)$monocle_clusters = as.character(monocle3::clusters(cds_8))
+
+
+Rdata_filename = paste0(fname_prefix_R, "_monocle_cds_clustered.RData")
+save(data, sample_info, data_seurat_clean, expression_matrix, gene_annotation,cds, meta,
+     cds_8,
+     file = Rdata_filename)
+
+plot_cells(cds,  color_cells_by = "seurat_clusters",group_label_size = 7, cell_size=0.8)#map by seurat clusters generated
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_bySeurat_clust.png"),
+     width = 18, height = 8)
+
+plot_cells(cds_8, color_cells_by="cluster", group_cells_by="cluster",group_label_size = 7, cell_size=0.8)#map by seurat clusters generated
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_clust8.png"),
+     width = 18, height = 8)
+
+
+#map by MONOCLE clusters generated
+
+cds_8 <- learn_graph(cds_8)#best among themclust forse piu definito
+cds=cds_8#this will be the iteration I will decide to use
+
+p=as.data.frame(cds@clusters@listData[["UMAP"]][["partitions"]])
+colnames(p) <- "partitionts"
+p$libID=rownames(p)
+
+l=as.data.frame(cds@clusters@listData[["UMAP"]][["clusters"]])
+colnames(l) <- "clust"
+l$libID=rownames(l)#clusters of cds_8
+#add the other clusterings
+
+
+clusters_monocle=p%>%left_join(l, by="libID")
+
+colData(cds)$monocle_clusters=l$clust
+colData(cds)$partitions=p$partitionts
+
+#add tsne details
+cds <- reduce_dimension(cds, reduction_method="tSNE")
+
+plot_cells(cds, reduction_method="tSNE", color_cells_by="monocle_clusters",label_cell_groups=T,
+           label_leaves=TRUE,
+           label_branch_points=TRUE,
+           graph_label_size=1.5,
+           group_label_size = 7,
+           cell_size=0.8)#map by Monocle clusters generated (type 5)
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "tsne_clust.png"),
+     width = 18, height = 8)
+
+plot_cells(cds, reduction_method="tSNE", color_cells_by="partitions",label_cell_groups=T,
+           label_leaves=TRUE,
+           label_branch_points=TRUE,
+           graph_label_size=1.5,
+           group_label_size = 7,
+           cell_size=0.8)#map by Monocle clusters generated (type 5)
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "tsne_partitions.png"),
+     width = 18, height = 8)
+
+plot_cells(cds, reduction_method="tSNE", color_cells_by="seurat_clusters",label_cell_groups=T,
+           label_leaves=TRUE,
+           label_branch_points=TRUE,
+           graph_label_size=1.5,
+           group_label_size = 7,
+           cell_size=0.8)#map by seurat clusters generated
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "tsne_seurat_clusters.png"),
+     width = 18, height = 8)
+
+#UMAP plots
+
+plot_cells(cds, reduction_method="UMAP", color_cells_by="monocle_clusters",label_cell_groups=F,
+           label_leaves=TRUE,
+           label_branch_points=TRUE,
+           graph_label_size=1.5,
+           group_label_size = 7,
+           cell_size=0.8,
+           show_trajectory_graph=F,
+           label_groups_by_cluster = F)#map by Monocle clusters generated (type 5)
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_monocle_clusters_by_samp.pdf"),
+     width = 10, height = 8)
+
+
+plot_cells(cds, reduction_method="UMAP", color_cells_by="monocle_clusters",label_cell_groups=T,
+           label_leaves=TRUE,
+           label_branch_points=TRUE,
+           graph_label_size=1.5,
+           group_label_size = 7,
+           cell_size=0.8,
+           show_trajectory_graph=F)#map by seurat clusters generated
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_monocle_clusters_trajectory.pdf"),
+     width = 15, height = 8)
+
+
+Rdata_filename = paste0(fname_prefix_R, "_monocle_cds_processed_FINAL_clustered.RData")
+save(data, OBJ_meta, sample_info, data_seurat_clean, metadata_table, expression_matrix, gene_annotation,cds, cds_5, 
+     file = Rdata_filename)
+
+plot_cells(cds, label_groups_by_cluster=F,  color_cells_by = "monocle_clusters")
+plot_cells(cds, label_groups_by_cluster=F,  color_cells_by = "seurat_clusters")
+
+composition_monocle=as.data.frame.matrix(table(cds$sample_id,cds$monocle_clusters))#by sample
+composition_seurat=as.data.frame.matrix(table(cds$sample_id,cds$seurat_clusters))#by sample
+
+meta=as.data.frame(cds@colData@listData)
+counts=as.data.frame(exprs(cds))
+
+
+ggplot(meta, aes(x = umap_1, y = umap_2)) +
+    geom_point(aes(color = monocle_clusters),
+               size=0.8)+
+  labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP Seurat with Monocle clusters overlay")+
+  scale_color_viridis(name = "monocle",
+                        option="H", discrete=T)+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_seurat_monocle_clusters.png"),
+     width = 15, height = 8)
+
+pbuild <- plot_cells(cds, color_cells_by = "monocle_clusters", label_cell_groups=T, show_trajectory_graph = F, label_leaves=F, label_branch_points=F, graph_label_size=3, group_label_size = 4, cell_size = 1) 
+UmapCDS <- data.frame(pbuild$data$sample_name,UMAP1_monocle = pbuild$data$data_dim_1, UMAP2_monocle = pbuild$data$data_dim_2, row.names = 1) 
+head(UmapCDS)
+colData(cds)$UMAP_1_monocle=pbuild$data$data_dim_1 #add umap data for further analysis outsidfe monocle
+colData(cds)$UMAP_2_monocle=pbuild$data$data_dim_2 #add umap data for further analysis outsidfe monocle
+meta=as.data.frame(cds@colData@listData)
+
+ggplot(meta, aes(x = UMAP_1_monocle, y = UMAP_2_monocle)) +
+    geom_point(aes(color = monocle_clusters),
+               size=0.8)+
+  labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP Monocle with Monocle clusters")+
+  scale_color_viridis(name = "monocle",
+                        option="H", discrete=T)+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_monocle_monocle_clusters.png"),
+     width = 15, height = 8)
+
+
+Rdata_filename = paste0(fname_prefix_R, "_monocle_cds_processed_FINAL_clustered.RData")
+save(data, OBJ_meta, sample_info, data_seurat_clean, metadata_table, expression_matrix, gene_annotation,cds, cds_5, meta,
+     file = Rdata_filename)
+
+
+```
+
+##### clean from protein coding genes
+#the file of protein coding genes is on zenodo
+
+```{r}
+################################################
+######do analysis on protein coding genes only!!!!!!!!!!!!!!!!!
+################################################
+#library("biomaRt")
+  # mart <- useMart(biomart="ensembl", dataset="hsapiens_gene_ensembl")
+ #  all_coding_genes <- getBM(attributes = c( "hgnc_symbol"), filters = c("biotype"), values #= list(biotype="protein_coding"), mart = mart)
+#protein_coding_genes=all_coding_genes$hgnc_symbol
+
+
+load("/231108_pcg.RData") ####on zenodo already available or run the code above
+
+protein_coding_genes=c(protein_coding_genes,"Fucciplex")
+
+cds <- cds[rowData(cds)$gene_short_name %in% protein_coding_genes,]#here I selected only protein coding genes
+counts=as.data.frame(exprs(cds))
+
+```
+
+
+###load cds file preprocessed for consistency or run the pipeline
+```{r}
+#load("/240118_meta_monocle_nested.RData")#latest dataset
+```
+
+
+## Find marker genes expressed by each monocle cluster
+```{r}
+marker_test_res = top_markers(cds, group_cells_by="monocle_clusters", reference_cells=NULL, cores=16)
+
+marker_test_res <- top_markers(cds, group_cells_by="monocle_clusters", 
+                               reference_cells=10000, cores=8)
+
+top_specific_markers <- marker_test_res %>%
+                            filter(fraction_expressing >= 0.10) %>%
+                            group_by(cell_group) %>%
+                            top_n(25, pseudo_R2)
+
+top_specific_marker_ids <- unique(top_specific_markers %>% dplyr::pull(gene_id))
+t25=data.frame(top_specific_markers$gene_id, top_specific_markers$cell_group, stringsAsFactors = F)
+colnames(t25)=c("ids", "cluster")
+
+write.csv(t25, file= paste0(fname_prefix_csv, "_", "top_25genes_per_cluster.CSV"), row.names=FALSE)
+
+top_100_specific_markers <- marker_test_res %>%
+                            filter(fraction_expressing >= 0.10) %>%
+                            group_by(cell_group) %>%
+                            top_n(100, pseudo_R2)
+
+###get gene lists
+library(readxl)
+cardiac_markers_full_gene_list <- read_excel("cardiac_markers_full_gene_list.xlsx", 
+    sheet = "C", col_types = c("text", "numeric", 
+         "numeric", "text", "numeric", "numeric", 
+         "numeric", "text"))
+cell_type_info= read_excel("cardiac_markers_full_gene_list.xlsx", 
+    sheet = "B")
+cardiac_markers_KS_list <- read_excel("cardiac_markers.xlsx", na = " ")
+
+###############make single dot plot graphs
+
+cardio_full=cardiac_markers_KS_list $`List Maria luisa`
+
+for (gene in cardio_full) {
+  # Create the plot
+  plot_cells(cds,
+             genes = gene,
+             label_cell_groups = FALSE,
+             show_trajectory_graph = FALSE)+ scale_color_viridis(option="H", discrete=F)
+
+  # Save the plot with a unique filename based on the gene name
+  ggsave(filename = paste0(fname_prefix_dotplot_single, "_", gene, ".png"),
+         width = 15, height = 6)
+
+  # Close all open graphical devices
+  graphics.off()
+}
+
+cardio=c("TTN","TNNT2", "TNNC1", "GATA4", "CTCF", "PDGFRA","Fucciplex")
+plot_cells(cds,
+           genes=cardio,
+           label_cell_groups=FALSE,
+           show_trajectory_graph=FALSE)+ scale_color_viridis(option="H", discrete=F)
+
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "cm_general.png"),
+     width = 15, height = 6)
+
+CM=c("TMEM88","ISL1","HAND1","NKX2-5","TBX5","GATA4","ATP2A2","PLN","TNNI1","MYH6","MYH7","MYL7","TTN","TNNT2","ITGB1BP2","Fucciplex")
+plot_cells(cds,
+           genes=CM,
+           label_cell_groups=FALSE,
+           show_trajectory_graph=FALSE)+ scale_color_viridis(option="H", discrete=F)
+
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "c_mature.png"),
+     width = 10, height = 10)
+
+lineage=c("SOX2","SOX17","CDH5","TBXT","MYH7","MYH6","MKI67","COL1A1","Fucciplex")
+plot_cells(cds,
+           genes=lineage,
+           label_cell_groups=FALSE,
+           show_trajectory_graph=FALSE)+ scale_color_viridis(option="H", discrete=F)
+
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "lineages.png"),
+     width = 10, height = 10)
+
+for (col_name in colnames(cardiac_markers_KS_list)) {
+  # Get the non-missing genes for the current column
+  current_genes <- unique(cardiac_markers_KS_list[, col_name][!is.na(cardiac_markers_KS_list[, col_name])])
+
+  # Create the plot
+  plot_cells(cds,
+             genes = current_genes,
+             label_cell_groups = FALSE,
+             show_trajectory_graph = FALSE)+ scale_color_viridis(option="H", discrete=F)
+
+  # Save the plot with a unique filename based on the column name
+  ggsave(filename = paste0(fname_prefix_dotplot, "_", col_name, ".png"),
+         width = 15, height = 6)
+
+  # Close the current plot to avoid overwriting it in the next iteration
+  graphics.off()
+}
+
+```
+## clean and assign cell type name
+
+```{r}
+#clean from the island clusters
+cds_clean=cds[,cds$monocle_clusters!="19"&cds$monocle_clusters!="18"&cds$monocle_clusters!="17"]
+#clean factor list from the island clusters
+cds_clean@colData@listData[["monocle_clusters"]]=factor(cds_clean@colData@listData[["monocle_clusters"]], levels= c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16"))
+
+meta_clean=as.data.frame(cds_clean@colData@listData)
+
+ggplot(meta_clean, aes(x = UMAP_1_monocle, y = UMAP_2_monocle)) +
+    geom_point(aes(color = monocle_clusters),
+               size=0.8)+
+  labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP Monocle with Monocle clusters")+
+  scale_color_viridis(name = "monocle",
+                        option="H", discrete=T)+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_monocle_monocle_clusters_clean.png"),
+     width = 15, height = 8)
+
+plot_cells(cds_clean, reduction_method="UMAP", color_cells_by="monocle_clusters",label_cell_groups=T,
+           label_leaves=TRUE,
+           label_branch_points=TRUE,
+           graph_label_size=1.5,
+           group_label_size = 7,
+           cell_size=0.8,
+           show_trajectory_graph=F)+
+  scale_color_viridis(name = "monocle",
+                        option="H", discrete=T)
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_monocle_clusters_trajectory.pdf"),
+     width = 15, height = 8)
+
+colData(cds_clean)$assigned_cell_type <- as.character(clusters(cds_clean))
+
+colData(cds_clean)$assigned_cell_type <- dplyr::recode(colData(cds_clean)$assigned_cell_type,
+                                                 "1"="Maturing cardiomyocites",
+                                                 "2"="hPSC",
+                                                 "3"="Cardiomyocites",
+                                                 "4"="Cardiomyocites",
+                                                 "5"="Cardiac fibroblasts",
+                                                 "6"="Mature Cardiomyocites",
+                                                 "7"="Endoderm",
+                                                 "8"="Mesoderm",
+                                                 "9"="Conductive cardiomyocytes",
+                                                 "10"="Cardiac progenitors",
+                                                 "11"="Endoderm",
+                                                 "12"="Proliferating fibroblasts",
+                                                 "13"="Proliferating cardiomyocites",
+                                                 "14"="Neurectoderm",
+                                                 "15"="Epicardial cells",
+                                                 "16"="Endotelial")
+meta=as.data.frame(cds@colData@listData)
+meta_clean=as.data.frame(cds_clean@colData@listData)
+
+plot_cells(cds_clean, reduction_method="UMAP", color_cells_by="assigned_cell_type",label_cell_groups=F,
+           label_leaves=TRUE,
+           label_branch_points=TRUE,
+           graph_label_size=1.5,
+           group_label_size = 7,
+           cell_size=0.8,
+           show_trajectory_graph=F)+
+  labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP cell type assignment Monocle clustering")+
+  scale_color_viridis(name = "monocle",
+                        option="H", discrete=T)
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_monocle_clusters_trajectory_assignedCT.pdf"),
+     width = 15, height = 8)
+
+cds_cardioid=cds_clean[,cds_clean$sample_id!="Germ_layers"]
+cds_cardioid=cds_cardioid[,cds_cardioid$monocle_clusters!="14"&cds_cardioid$monocle_clusters!="7"&cds_cardioid$monocle_clusters!="8"&cds_cardioid$monocle_clusters!="2"]
+
+cds_germ=cds_clean[,cds_clean$sample_id=="Germ_layers"]
+cds_germ=cds_germ[,cds_germ$monocle_clusters!="15"&cds_germ$monocle_clusters!="5"&cds_germ$monocle_clusters!="9"&cds_germ$monocle_clusters!="6"]
+
+plot_cells(cds_cardioid, reduction_method="UMAP", color_cells_by="assigned_cell_type",label_cell_groups=F,
+           label_leaves=TRUE,
+           label_branch_points=TRUE,
+           graph_label_size=1.5,
+           group_label_size = 7,
+           cell_size=0.8,
+           show_trajectory_graph=F)+
+  labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP cell type assignment Monocle clustering")+
+  scale_color_viridis(name = "monocle",
+                        option="H", discrete=T)
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_monocle_clusters_trajectory_assignedCT_cardioid.pdf"),
+     width = 8, height = 4)
+
+plot_cells(cds_germ, reduction_method="UMAP", color_cells_by="assigned_cell_type",label_cell_groups=F,
+           label_leaves=TRUE,
+           label_branch_points=TRUE,
+           graph_label_size=1.5,
+           group_label_size = 7,
+           cell_size=0.8,
+           show_trajectory_graph=F)+
+  labs(x = "UMAP 1", y = "UMAP 2", title = "UMAP cell type assignment Monocle clustering")+
+  scale_color_viridis(name = "monocle",
+                        option="H", discrete=T)
+last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_monocle_clusters_trajectory_assignedCT_germ.pdf"),
+     width = 6, height = 4)
+
+meta_cardio=as.data.frame(cds_cardioid@colData@listData)
+meta_germ=as.data.frame(cds_germ@colData@listData)
+
+Rdata_filename = paste0(fname_prefix_R, "_monocle_cds_clustered_proteincoding_PSEUDOTIME_clean.RData")
+save(meta, meta_cardio, meta_germ, meta_clean, sample_info, data_seurat_clean, expression_matrix, gene_annotation,cds,cds_clean,cds_cardioid,cds_germ,
+     file = Rdata_filename)
+
+```
+
+## create GMT files to run GSEA or to create gene lists
+ 
+```{r}
+
+gene_lists=list()
+
+
+for (c in unique(cardiac_markers_full_gene_list$celltype)) {
+ 
+tmp=subset(cardiac_markers_full_gene_list, cardiac_markers_full_gene_list$celltype==c)
+gene_list=tmp$`Gene name`
+
+gene_lists[[c]]=gene_list
+
+}
+
+# Create a data frame for the GMT format
+gmt_data <- data.frame(
+  Name = names(gene_lists),  # Use cell type names as gene set names
+  Description = rep("https://doi.org/10.1016/j.cell.2022.11.028", length(gene_lists)),
+  Gene_Symbols = lapply(gene_lists, paste, collapse = "\t")
+)
+
+# Write the data frame to a GMT file
+write.table(gmt_data, file= paste0(fname_prefix_csv, "_", "gene_list_cardio.txt"), sep = "\t", quote = FALSE, row.names = FALSE, col.names = FALSE)
+
+
+#####make files to use in GSEA in the same way
+pathways_files<-list.files(pattern = "\\.gmt", recursive = T)#get gmt files
+pathways <- lapply(pathways_files, function(x) gmtPathways(x)) #get lists with gene lists
+
+#get one to show how it is and which colnames to have
+C2_pathway = msigdbr(species = "Homo sapiens", category = "C2",subcategory = "CP:REACTOME")#pahtway
+colnames(C2_pathway)
+
+cell_type_info=cell_type_info%>%dplyr::rename(celltype=Name)
+
+
+cardiac_gene_list_df=cardiac_markers_full_gene_list%>%left_join(cell_type_info, by="celltype")%>%
+  dplyr::rename(gene_symbol=`Gene name`, gs_name=celltype,gs_desctiption=`Name (long)`,gs_cat=`Cluster ID`)
+cardiac_gene_list_df=cardiac_gene_list_df%>%
+  dplyr::select(gene_symbol,gs_name,gs_cat,gs_desctiption)%>%mutate(gs_subcat=paste0("cardio_",cardiac_gene_list_df$gs_cat), human_gene_symbol=cardiac_gene_list_df$gene_symbol,gs_geoid="", gs_pmid="", gs_url="https://doi.org/10.1016/j.cell.2022.11.028")
+
+library("AnnotationDbi")
+library("org.Hs.eg.db")
+cardiac_gene_list_df$ensembl_gene = mapIds(org.Hs.eg.db,
+                    keys=cardiac_gene_list_df$gene_symbol, 
+                    column="ENSEMBL",
+                    keytype="SYMBOL",
+                    multiVals="first")
+
+cardiac_gene_list_df$entrez_gene = mapIds(org.Hs.eg.db,
+                    keys=cardiac_gene_list_df$gene_symbol, 
+                    column="ENTREZID",
+                    keytype="SYMBOL",
+                    multiVals="first")
+
+meta=as.data.frame(cds@colData@listData)
+
+cardiac_gene_list_df=cardiac_gene_list_df%>%dplyr::mutate(human_entrez_gene=cardiac_gene_list_df$entrez_gene, 
+                                                    human_ensembl_gene=cardiac_gene_list_df$ensembl_gene,
+                                                    gs_exact_source="", gs_id="")%>%dplyr::select(gs_cat,gs_subcat,gs_name,gene_symbol,entrez_gene,ensembl_gene,human_gene_symbol,human_entrez_gene,human_ensembl_gene,gs_id,gs_pmid,gs_geoid,gs_exact_source,gs_url)
+
+Rdata_filename = paste0(fname_prefix_R, "_monocle_cds_clustered_proteincoding.RData")
+save(meta, sample_info, data_seurat_clean, expression_matrix, gene_annotation,cds,
+     file = Rdata_filename)
+
+Rdata_filename = paste0(fname_prefix_R, "_monocle_cds_clustered_proteincoding_PSEUDOTIME_clean.RData")
+save(meta, meta_cardio, meta_germ, meta_clean, sample_info, data_seurat_clean, expression_matrix, gene_annotation,cds,cds_clean,cds_cardioid,cds_germ,
+     file = Rdata_filename)
+
+Rdata_filename = paste0(fname_prefix_R, "_lists.RData")
+save(cardiac_markers_full_gene_list,gene_lists, gmt_data,marker_test_res,top_specific_markers,top_100_specific_markers,cardiac_gene_list_df,
+     file = Rdata_filename)
+
+```
+ 
+ 
+## find pseudotime trajectory
+
+```{r}
+
+load ("/24011_monocle_cds_clustered_proteincoding_PSEUDOTIME_clean_gene_info.RData") #load data complete with clean data and subsetted and cell type assigned
+
+load("/240116_lists.RData") #load gene lists
+
+cds_complete=cds 
+#cds_clean continue to exist
+cds=cds_clean #change name to continue and cds_clean continue to exist
+#cds_germ (germ layer selected cells)
+#cds_cardioid (cardioid selected cells)
+
+cds<- order_cells(cds,reduction_method = "UMAP")#selected around cluster 3
+cds_cardioid<- order_cells(cds_cardioid,reduction_method = "UMAP")#selected around cluster 3
+
+plot_cells(cds,
+           color_cells_by = "pseudotime",
+           label_cell_groups=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           show_trajectory_graph = T,
+           graph_label_size=1.5)
+#last_plot()+facet_wrap(~sample_id, ncol=3)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_pseudotime.pdf"),
+     width = 6, height = 5)
+
+plot_cells(cds_cardioid,
+           color_cells_by = "pseudotime",
+           label_cell_groups=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           show_trajectory_graph = T,
+           graph_label_size=1.5)
+last_plot()+facet_wrap(~sample_id, ncol=4)
+ggsave(filename = paste0(fname_prefix_UMAP, "_", "UMAP_pseudotime_cardioid.pdf"),
+     width = 8, height = 8)
+
+maturation=c("TTN","TNNT2", "TNNC1")
+cardiac_lineage_cds <- cds[rowData(cds)$gene_short_name %in% maturation,]
+plot_genes_in_pseudotime(cardiac_lineage_cds,
+                         color_cells_by="monocle_clusters",
+                         min_expr=0.5)
+#last_plot()+facet_grid(~sample_id)
+
+#piu o meno, forse meglio dividere i cardioidi siccome hanno due pseudotime diversi
+
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "_maturation_pseudotime.png"),
+     width = 6, height = 4)
+
+cds_cardioid_e=cds_cardioid[,cds_cardioid$sample_id!="Cardioid_late"]
+cds_cardioid_l=cds_cardioid[,cds_cardioid$sample_id=="Cardioid_late"]
+
+cardiac_lineage_cds <- cds_cardioid_l[rowData(cds_cardioid_l)$gene_short_name %in% maturation,]
+monocle3::plot_genes_in_pseudotime(cardiac_lineage_cds,
+                         color_cells_by="monocle_clusters",
+                         min_expr=0.5)
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "_maturation_pseudotime_cardioid_late.png"),
+     width = 18, height = 8)
+
+cardiac_lineage_cds <- cds_cardioid_e[rowData(cds_cardioid_e)$gene_short_name %in% maturation,]
+monocle3::plot_genes_in_pseudotime(cardiac_lineage_cds,
+                         color_cells_by="monocle_clusters",
+                         min_expr=0.5)
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "_maturation_pseudotime_cardioid_early.png"),
+     width = 18, height = 8)
+
+
+#########################fucciplex graphs
+#############NB only clusters with pseudotime data
+
+f=c("Fucciplex")
+fucci_cds <- cds[rowData(cds)$gene_short_name %in% f,]
+monocle3::plot_genes_in_pseudotime(fucci_cds,
+                         color_cells_by="assigned_cell_type",
+                         min_expr=0.5)
+#last_plot()+facet_grid(~sample_id)
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "_fucciplex_pseudotime.png"),
+     width = 5.5, height = 3)
+
+fucci_cds <- cds_cardioid_l[rowData(cds_cardioid_l)$gene_short_name %in% f,]
+monocle3::plot_genes_in_pseudotime(fucci_cds,
+                         color_cells_by="assigned_cell_type",
+                         min_expr=0.5)
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "_fucciplex_pseudotime_cardioid_late.png"),
+     width = 18, height = 8)
+
+fucci_cds <- cds_cardioid_e[rowData(cds_cardioid_e)$gene_short_name %in% f,]
+monocle3::plot_genes_in_pseudotime(fucci_cds,
+                         color_cells_by="assigned_cell_type",
+                         min_expr=0.5)
+ggsave(filename = paste0(fname_prefix_dotplot, "_", "_fucciplex_pseudotime_cardioid_early.png"),
+     width = 18, height = 8)
+
+
+
+```
+
+##### do gene plots (violin,ridge ecc)
+
+```{r}
+
+genes = c("Fucciplex","MKI67","EEF1A1")
+#genes_to_plot <- cl1
+#genes_to_plot <- cl1only
+#genes_to_plot <- cl2
+cds_subset <- cds[rowData(cds)$gene_short_name %in% genes,]
+
+monocle3::plot_genes_violin(cds_subset, group_cells_by="sample_id", ncol=3) +
+      theme(axis.text.x=element_text(angle=45, hjust=1))#+
+  #facet_wrap(~assigned_cell_type, ncol=7)
+
+ggsave(filename = paste0(fname_prefix_markers, "_", "violin_fucci.png"),
+     width = 16, height =10)
+
+monocle3::plot_genes_violin(cds_subset, group_cells_by="sample_id", ncol=3) +
+      theme(axis.text.x=element_text(angle=45, hjust=1))+
+  facet_wrap(~assigned_cell_type, ncol=7)
+
+ggsave(filename = paste0(fname_prefix_markers, "_", "violin_fucci_cells.png"),
+     width = 16, height =10)
+
+cds_subset <- cds_cardioid[rowData(cds_cardioid)$gene_short_name %in% genes,]
+monocle3::plot_genes_violin(cds_subset, group_cells_by="sample_id", ncol=3) +
+      theme(axis.text.x=element_text(angle=45, hjust=1))+
+  facet_wrap(~assigned_cell_type, ncol=5)
+
+ggsave(filename = paste0(fname_prefix_markers, "_", "violin_fucci_cardioid.png"),
+     width = 16, height =10)
+
+cds_subset <- cds_germ[rowData(cds_germ)$gene_short_name %in% genes,]
+monocle3::plot_genes_violin(cds_subset, group_cells_by="assigned_cell_type", ncol=3) +
+      theme(axis.text.x=element_text(angle=45, hjust=1))
+
+ggsave(filename = paste0(fname_prefix_markers, "_", "violin_fucci_germ.png"),
+     width = 16, height =10)
+
+cds_subset <- cds_cardioid_l[rowData(cds_cardioid_l)$gene_short_name %in% genes,]
+monocle3::plot_genes_violin(cds_subset, group_cells_by="assigned_cell_type", ncol=3) +
+      theme(axis.text.x=element_text(angle=45, hjust=1))
+
+ggsave(filename = paste0(fname_prefix_markers, "_", "violin_fucci_cardioid_late.png"),
+     width = 16, height =10)
+
+cds_subset <- cds_cardioid_e[rowData(cds_cardioid_e)$gene_short_name %in% genes,]
+monocle3::plot_genes_violin(cds_subset, group_cells_by="assigned_cell_type", ncol=2) +
+      theme(axis.text.x=element_text(angle=45, hjust=1))
+
+ggsave(filename = paste0(fname_prefix_markers, "_", "violin_fucci_cardioid_late.png"),
+     width = 16, height =10)
+
+#################add gene info
+genes = c("Fucciplex","MKI67","EEF1A1")
+#counts=as.data.frame(exprs(cds))
+counts <- as.data.frame(monocle3::normalized_counts(cds))#get normalized data
+counts.genes= subset(counts, row.names(counts) %in% genes)
+counts.genes$symbol = row.names(counts.genes)
+to.plot = melt(counts.genes)
+to.plot=to.plot%>%dplyr::rename(libID=variable)
+fucci=subset(to.plot, to.plot$symbol=="Fucciplex")%>%dplyr::rename(Fucciplex=value)%>%dplyr::select(-symbol)
+MK=subset(to.plot, to.plot$symbol=="MKI67")%>%dplyr::rename(MKI67=value)%>%dplyr::select(-symbol)
+EF1=subset(to.plot, to.plot$symbol=="EEF1A1")%>%dplyr::rename(EEF1A1=value)%>%dplyr::select(-symbol)
+annotations=tibble::as_tibble(as.data.frame(cds@colData@listData))
+to.plot=fucci%>%dplyr::right_join(MK,by="libID")%>%dplyr::right_join(EF1,by="libID")%>%dplyr::right_join(annotations,by="libID")
+rownames(to.plot)=to.plot$libID
+
+cds@colData@listData[["Fucciplex"]]=to.plot$Fucciplex
+cds@colData@listData[["EF1"]]=to.plot$EEF1A1
+cds@colData@listData[["MKI67"]]=to.plot$MKI67
+
+#################cardioid info
+genes = c("Fucciplex","MKI67","EEF1A1")
+#counts=as.data.frame(exprs(cds_cardioid))
+counts <- as.data.frame(monocle3::normalized_counts(cds_cardioid))#get normalized data
+
+counts.genes= subset(counts, row.names(counts) %in% genes)
+counts.genes$symbol = row.names(counts.genes)
+to.plot = melt(counts.genes)
+to.plot=to.plot%>%dplyr::rename(libID=variable)
+fucci=subset(to.plot, to.plot$symbol=="Fucciplex")%>%dplyr::rename(Fucciplex=value)%>%dplyr::select(-symbol)
+MK=subset(to.plot, to.plot$symbol=="MKI67")%>%dplyr::rename(MKI67=value)%>%dplyr::select(-symbol)
+EF1=subset(to.plot, to.plot$symbol=="EEF1A1")%>%dplyr::rename(EEF1A1=value)%>%dplyr::select(-symbol)
+annotations=tibble::as_tibble(as.data.frame(cds_cardioid@colData@listData))
+to.plot=fucci%>%dplyr::right_join(MK,by="libID")%>%dplyr::right_join(EF1,by="libID")%>%dplyr::right_join(annotations,by="libID")
+rownames(to.plot)=to.plot$libID
+
+cds_cardioid@colData@listData[["Fucciplex"]]=to.plot$Fucciplex
+cds_cardioid@colData@listData[["EF1"]]=to.plot$EEF1A1
+cds_cardioid@colData@listData[["MKI67"]]=to.plot$MKI67
+
+#################germ info
+genes = c("Fucciplex","MKI67","EEF1A1")
+#counts=as.data.frame(exprs(cds_germ))
+counts <- as.data.frame(monocle3::normalized_counts(cds_germ))#get normalized data
+
+counts.genes= subset(counts, row.names(counts) %in% genes)
+counts.genes$symbol = row.names(counts.genes)
+to.plot = melt(counts.genes)
+to.plot=to.plot%>%dplyr::rename(libID=variable)
+fucci=subset(to.plot, to.plot$symbol=="Fucciplex")%>%dplyr::rename(Fucciplex=value)%>%dplyr::select(-symbol)
+MK=subset(to.plot, to.plot$symbol=="MKI67")%>%dplyr::rename(MKI67=value)%>%dplyr::select(-symbol)
+EF1=subset(to.plot, to.plot$symbol=="EEF1A1")%>%dplyr::rename(EEF1A1=value)%>%dplyr::select(-symbol)
+annotations=tibble::as_tibble(as.data.frame(cds_germ@colData@listData))
+to.plot=fucci%>%dplyr::right_join(MK,by="libID")%>%dplyr::right_join(EF1,by="libID")%>%dplyr::right_join(annotations,by="libID")
+rownames(to.plot)=to.plot$libID
+
+cds_germ@colData@listData[["Fucciplex"]]=to.plot$Fucciplex
+cds_germ@colData@listData[["EF1"]]=to.plot$EEF1A1
+cds_germ@colData@listData[["MKI67"]]=to.plot$MKI67
+
+cds@colData@listData[["assigned_cell_type"]] =dplyr::recode(cds@colData@listData[["assigned_cell_type"]],
+                                                 "?Cardiac conduction"="Conductive mature cardiomyocites")
+cds_germ@colData@listData[["assigned_cell_type"]]=dplyr::recode(cds_germ@colData@listData[["assigned_cell_type"]],
+                                                 "?Cardiac conduction"="Conductive mature cardiomyocites")
+cds_cardioid@colData@listData[["assigned_cell_type"]]=dplyr::recode(cds_cardioid@colData@listData[["assigned_cell_type"]],
+                                                 "?Cardiac conduction"="Conductive mature cardiomyocites")
+
+meta_germ=as.data.frame(cds_germ@colData@listData)
+meta=as.data.frame(cds@colData@listData)
+meta_cardio=as.data.frame(cds_cardioid@colData@listData)
+
+Rdata_filename = paste0(fname_prefix_R, "_monocle_cds_clustered_proteincoding_PSEUDOTIME_clean_gene_info.RData")
+save(meta, meta_cardio, meta_germ, meta_clean, sample_info, data_seurat_clean, expression_matrix, gene_annotation,cds,cds_clean,cds_cardioid,cds_germ,cds_complete,
+     file = Rdata_filename)
+
+ggplot(meta, aes(x = Fucciplex, y = assigned_cell_type, fill = ..x..)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  scale_fill_viridis(name = "Fucciplex", option = "C") +
+  labs(title = 'Fucciplex expression') +
+    theme(
+      legend.position="none",
+      panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(size = 8)
+    ) 
+ggsave(filename = paste0(fname_prefix_markers, "_", "ridge_all.png"),
+     width = 10, height =10)
+
+ggplot(meta_cardio, aes(x = Fucciplex, y = assigned_cell_type, fill = ..x..)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  scale_fill_viridis(name = "Fucciplex", option = "C") +
+  labs(title = 'Fucciplex expression in 4.5 and 7.5 cardioids') +
+    theme(
+      legend.position="none",
+      panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(size = 8)
+    ) +
+  facet_wrap(~Phase, ncol=3)
+ggsave(filename = paste0(fname_prefix_markers, "_", "ridge_cardio_cell_cycle.png"),
+     width = 14, height =10)
+
+ggplot(data=subset(meta_cardio,meta_cardio$sample_id=="Cardioid_late"), aes(x = Fucciplex, y = assigned_cell_type, fill = ..x..)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  scale_fill_viridis(name = "Fucciplex", option = "C") +
+  labs(title = 'Fucciplex expression cardioid early') +
+    theme(
+      legend.position="none",
+      panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(size = 8)
+    ) 
+ggsave(filename = paste0(fname_prefix_markers, "_", "ridge_cardio_late.png"),
+     width = 10, height =10)
+
+ggplot(data=subset(meta_cardio,meta_cardio$sample_id=="Cardioid_early"), aes(x = Fucciplex, y = assigned_cell_type, fill = ..x..)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  scale_fill_viridis(name = "Fucciplex", option = "C") +
+  labs(title = 'Fucciplex expression cardioid early') +
+    theme(
+      legend.position="none",
+      panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(size = 8)
+    ) 
+ggsave(filename = paste0(fname_prefix_markers, "_", "ridge_cardio_early.png"),
+     width = 10, height =7)
+
+ggplot(meta_germ, aes(x = Fucciplex, y = assigned_cell_type, fill = ..x..)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  scale_fill_viridis(name = "Fucciplex", option = "C") +
+  labs(title = 'Fucciplex expression germ layers') +
+    theme(
+      legend.position="none",
+      panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(size = 8)
+    ) 
+ggsave(filename = paste0(fname_prefix_markers, "_", "ridge_germ.png"),
+     width = 10, height =7)
+
+Rdata_filename = paste0(fname_prefix_R, "_meta_monocle_nested.RData")
+save(meta,
+     file = Rdata_filename)
+
+```
+
+
+#calculate correlation coefficent and pvalue Ficci vs EF1a or KI67
+
+```{r}
+#calculate correlation coefficent and pvalue
+meta_germ=as.data.frame(cds_germ@colData@listData)
+meta=as.data.frame(cds@colData@listData)
+meta_cardio=as.data.frame(cds_cardioid@colData@listData)
+
+###########################
+##do correlation FUCCI vs EF1a
+###########################
+
+####stat for the simple correlation between Fucciplex and EF1a
+###########################
+cor(meta$Fucciplex, meta$EF1, method="spearman")
+correlation_EF1a=cor.test(meta$Fucciplex, meta$EF1, method="spearman")#S = 1.0561e+11, p-value < 2.2e-16 #rho 0.2548564
+stat.global=data.frame(cell_type = "all_data", pval = correlation_EF1a[["p.value"]] ,rho= correlation_EF1a[["estimate"]][["rho"]], stringsAsFactors = FALSE)
+
+##do correlation by cell type FUCCI vs EF1a
+###########################
+cell_types = unique(meta$assigned_cell_type)# Get unique cell types
+# Initialize an empty data frame to store the results
+stat = data.frame(cell_type = character(), pval = numeric(), stringsAsFactors = FALSE)
+
+# Loop through each cell type
+for (cell_type in cell_types) {
+  # Subset the data for the current cell type
+  sub = subset(meta, meta$assigned_cell_type == cell_type)
+  
+  # Perform correlation test
+  correlation_result = cor.test(sub$Fucciplex, sub$EF1, method = "spearman")
+  
+  # Extract p-value
+  p_value = correlation_result[["p.value"]]
+  rho = correlation_result[["estimate"]][["rho"]]
+  
+  # Append results to the data frame
+  stat = rbind(stat, data.frame(cell_type = cell_type, pval = p_value, rho= rho, stringsAsFactors = FALSE))
+}
+
+stat_EF1a=rbind(stat, stat.global)
+
+stat_EF1a$adj_pval=p.adjust(stat_EF1a$pval,method="bonferroni")
+stat_EF1a$sig=stat_EF1a$adj_pval<=0.05
+
+ggscatter(meta, x = "Fucciplex", y = "EF1", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "Spearman",
+          xlab = "Fucciplex Normalized exp", ylab = "EEF1A1 Normalized exp")+ 
+  labs(title = "Spearman correlation between Fucci and EEF1A1", subtitle = paste0("adj Pval: ",stat_EF1a[15,4]," rho:",stat_EF1a[15,3]))
+ggsave(filename = paste0(fname_prefix_markers, "_", "correlation_Fucci_EEF1A1.png"),
+     width = 5, height =5)
+
+ggscatter(meta, x = "Fucciplex", y = "EF1", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "Spearman",
+          xlab = "Fucciplex Normalized exp", ylab = "EEF1A1 Normalized exp")+
+  facet_wrap(~assigned_cell_type, ncol=5)
+ggsave(filename = paste0(fname_prefix_markers, "_", "correlation_Fucci_EEF1A1_cell_types.png"),
+     width = 10, height =10)
+
+###########################
+##do correlation FUCCI vs MKI67
+###########################
+
+####stat for the simple correlation between Fucciplex and MKI67
+###########################
+cor(meta$Fucciplex, meta$EF1, method="spearman")
+correlation_MKI67=cor.test(meta$Fucciplex, meta$MKI67, method="spearman")#S = 1.0016e+11, p-value < 2.2e-16 #rho 0.293278
+stat.global=data.frame(cell_type = "all_data", pval = correlation_MKI67[["p.value"]] ,rho= correlation_MKI67[["estimate"]][["rho"]], stringsAsFactors = FALSE)
+
+##do correlation by cell type FUCCI vs MKI67
+###########################
+cell_types = unique(meta$assigned_cell_type)# Get unique cell types
+# Initialize an empty data frame to store the results
+stat = data.frame(cell_type = character(), pval = numeric(), stringsAsFactors = FALSE)
+
+# Loop through each cell type
+for (cell_type in cell_types) {
+  # Subset the data for the current cell type
+  sub = subset(meta, meta$assigned_cell_type == cell_type)
+  
+  # Perform correlation test
+  correlation_result = cor.test(sub$Fucciplex, sub$MKI67, method = "spearman")
+  
+  # Extract p-value
+  p_value = correlation_result[["p.value"]]
+  rho = correlation_result[["estimate"]][["rho"]]
+  
+  # Append results to the data frame
+  stat = rbind(stat, data.frame(cell_type = cell_type, pval = p_value, rho= rho, stringsAsFactors = FALSE))
+}
+
+stat_MKI67=rbind(stat, stat.global)
+
+stat_MKI67$adj_pval=p.adjust(stat_MKI67$pval,method="bonferroni")
+stat_MKI67$sig=stat_MKI67$adj_pval<=0.05
+
+
+ggscatter(meta, x = "Fucciplex", y = "MKI67", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "Spearman",
+          xlab = "Fucciplex Normalized exp", ylab = "MKI67 Normalized exp")+ 
+  labs(title = "Spearman correlation between Fucci and MKI67", subtitle = paste0("adj Pval: ",stat_MKI67[15,4]," rho:",stat_MKI67[15,3]))
+ggsave(filename = paste0(fname_prefix_markers, "_", "correlation_Fucci_MKI67.png"),
+     width = 5, height =5)
+
+ggscatter(meta, x = "Fucciplex", y = "MKI67", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "Spearman",
+          xlab = "Fucciplex Normalized exp", ylab = "MKI67 Normalized exp")+
+  facet_wrap(~assigned_cell_type, ncol=5)
+ggsave(filename = paste0(fname_prefix_markers, "_", "correlation_Fucci_MKI67_cell_types.png"),
+     width = 10, height =10)
+```
+#Find if unbiases there are genes correlated with Fucci in general
+
+```{r}
+
+counts <- as.data.frame(monocle3::normalized_counts(cds))#get normalized data from all cells
+transposed=t(counts)
+info=meta%>%select(libID, assigned_cell_type)
+transposed.info=as.data.frame(transposed)%>%mutate(libID=row.names(transposed))
+transposed.info=transposed.info%>%left_join(info, by=c("libID"))
+
+##do correlation by cell type FUCCI vs all genes
+###########################
+# Get unique genes
+genes = unique(colnames(as.data.frame(transposed)))# Get unique cell types
+#genes = c("MKI67","EEF1A1")# betatest and it works
+
+# Initialize an empty data frame to store the results
+stat_Fucci_all = data.frame(genes = character(), pval = numeric(), rho = numeric(), stringsAsFactors = FALSE)
+
+# Loop through each gene
+for (genes in genes) {
+  
+  # Perform correlation test
+  correlation_result = cor.test(as.data.frame(transposed)$Fucciplex, as.data.frame(transposed)[, genes], method = "spearman")
+  
+  # Extract p-value and rho
+  p_value = correlation_result[["p.value"]]
+  rho = correlation_result[["estimate"]][["rho"]]
+  
+  # Append results to the data frame
+  stat_Fucci_all = rbind(stat_Fucci_all, data.frame(genes = genes, pval = p_value, rho = rho, stringsAsFactors = FALSE))
+}
+
+# Adjust p-values and determine significance
+stat_Fucci_all$adj_pval = p.adjust(stat_Fucci_all$pval, method = "BH")
+stat_Fucci_all$sig = stat_Fucci_all$adj_pval <= 0.05
+
+filename = paste0(fname_prefix_csv, "_", "correlation_Fucci_all.csv")
+write.csv(stat_Fucci_all,filename)
+
+filename = paste0(fname_prefix_csv, "_", "correlation_Fucci_EF1A.csv")
+write.csv(stat_EF1a,filename)
+
+filename = paste0(fname_prefix_csv, "_", "correlation_Fucci_MKI67.csv")
+write.csv(stat_MKI67,filename)
+                        
+Rdata_filename = paste0(fname_prefix_R, "_Fucci_stat_correlations.RData")
+save(stat_EF1a,stat_MKI67,stat_Fucci_all,transposed.info,transposed,
+     file = Rdata_filename)
+
+stat_Fucci_all=subset(stat_Fucci_all,stat_Fucci_all$sig==T|stat_Fucci_all$sig==F)
+s=stat_Fucci_all
+
+####################################
+####################################
+#do a volcano plot
+####################################
+####################################
+
+#Set the significance level cutoff
+sig_level <- 0.05
+#Set a fold-change cutoff
+fc_level <- 0.2
+fc_level2 <- (0.2)*-1
+###################################
+
+#built a color code for your variables
+stat_Fucci_all$treshold<-ifelse(stat_Fucci_all$rho>=fc_level&stat_Fucci_all$adj_pval<=sig_level,"up",
+                                ifelse(stat_Fucci_all$rho<=fc_level2&stat_Fucci_all$adj_pval<=sig_level , "down", "other"))
+
+stat_Fucci_all$Log10pvalue=log10(stat_Fucci_all$adj_pval+0.000000000000000000000000000000000000001)
+stat_Fucci_all$to_show <- ifelse(stat_Fucci_all$treshold!="other", stat_Fucci_all$genes, "")#create to_show column
+stat_Fucci_all=stat_Fucci_all%>%filter(genes!="Fucciplex")#clean gene list from Fucciplex wich will be clearly correlated with itself
+# Extracting the top 25 and bottom 25 rows based on 'rho'
+top_25 <- head(stat_Fucci_all[order(-stat_Fucci_all$rho), ], 25)
+bottom_25 <- tail(stat_Fucci_all[order(-stat_Fucci_all$rho), ], 25)
+# Creating a vector of genes in the top and bottom 25
+genes_to_show <- c(top_25$genes, bottom_25$genes)
+
+# Updating 'to_show' column to only include genes in the top 25 and bottom 25
+stat_Fucci_all$to_show <- ifelse(stat_Fucci_all$genes %in% genes_to_show, stat_Fucci_all$genes, "")
+
+###################################
+
+stat_Fucci_all=stat_Fucci_all%>% distinct(genes, .keep_all = TRUE)#eliminate duplicates
+
+ggplot(data=stat_Fucci_all, aes(x=rho, y=log10(adj_pval+1e-323)*-1)) +
+  geom_point(aes(colour = as.factor(treshold)), size=1.5) +
+  scale_colour_manual(values = c("up"= "red", "down"="blue",  "other"= "grey"))+
+  #geom_text(aes(label=to_show), size=4, hjust=1.2)+
+  ggrepel::geom_text_repel(
+    data = stat_Fucci_all,
+    max.overlaps =100,
+    aes(label = to_show),
+    size = 3,
+    box.padding = unit(0.35, "lines"),
+    point.padding = unit(0.3, "lines")
+  ) +
+  labs (title= "Genes correlated with Fucci gene expression")+
+  theme(legend.position = "none") +
+  geom_hline(yintercept = (sig_level))+
+  geom_vline(xintercept = c(fc_level, fc_level2),linetype=3)+
+  xlim(c(-0.5, 0.5))+ ylim(c(100,450))+
+  xlab("rho") + ylab("-Log10 adj p-value")
+
+ggsave(filename = paste0(fname_prefix_dotplot, "_Fucciplex_correlation.png"),
+       width = 8, height = 6)
+
+```
+
+###run GO analysis on Fucci_all genes
+
+```{r}
+library(topGO)
+data(geneList)
+
+geneList=data.frame(gene_short_name=rownames(counts), row.names = rownames(counts))
+  #select from geneList object
+named_vector <- setNames(geneList$gene_short_name, geneList$gene_short_name)
+allGenes=as.factor(geneList$gene_short_name)
+
+topDiffGenes= subset(stat_Fucci_all,stat_Fucci_all$sig==T&stat_Fucci_all$treshold=="up")
+topDiffGenes_names=topDiffGenes$genes
+top = geneList %>% dplyr::filter(gene_short_name %in% topDiffGenes_names)
+geneSel=as.factor(top$gene_short_name)
+
+bottomDiffGenes=subset(stat_Fucci_all,stat_Fucci_all$sig==T&stat_Fucci_all$treshold=="down")
+bottomDiffGenes_names=bottomDiffGenes$genes
+bottom =geneList %>% dplyr::filter(gene_short_name %in% bottomDiffGenes_names)
+
+
+#https://bioconductor.org/packages/devel/bioc/vignettes/topGO/inst/doc/topGO.pdf
+#https://bioconductor.org/packages/release/bioc/html/topGO.html
+#https://rdrr.io/bioc/topGO/
+
+#to create topGOdata object, you can see a sample from data(GOdata) you can view GOdata
+sampleGOdata <- new("topGOdata", description = "Simple session", ontology = "BP", allGenes = c(geneList$gene_short_name), geneSel = geneSel, nodeSize = 10,
+                    annot = annFUN.db, affyLib = affyLib)
+
+```
+
+
+
+
+
+
+
+
+
