@@ -1,0 +1,4 @@
+sample_id,molecule_h5,orig.ident
+Germ_layers,/home/ebalmas/scpHUB/projects/FP01/multi_FP-nested/outs/per_sample_outs/Germ_layers/count/sample_molecule_info.h5,1
+Cardioid_early,/home/ebalmas/scpHUB/projects/FP01/multi_FP-nested/outs/per_sample_outs/Cardioid_early/count/sample_molecule_info.h5,2
+Cardioid_late,/home/ebalmas/scpHUB/projects/FP01/multi_FP-nested/outs/per_sample_outs/Cardioid_late/count/sample_molecule_info.h5,3
